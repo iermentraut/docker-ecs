@@ -25,7 +25,6 @@ LABEL maintainer="Igor Ermentraut <ie@efsa.io>"
 USER root
 
 COPY ./ /docker
-COPY ./tests /application
 
 RUN \
     chmod +x "/docker/${PLATFORM}/application_user.sh" && \
