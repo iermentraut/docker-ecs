@@ -14,7 +14,7 @@ ARG \
 RUN \
   set -xe && \
   composer --quiet --no-cache global require \
-    symplify/easy-coding-standard:${ECS_PACKAGE_VERSION}
+    symplify/easy-coding-standard:"${ECS_PACKAGE_VERSION}"
 
 FROM php:${PHP_VERSION}-cli-${PLATFORM}
 
