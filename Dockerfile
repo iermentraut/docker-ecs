@@ -31,3 +31,7 @@ RUN \
     sh "/docker/${PLATFORM}/application_user.sh"
 
 USER application
+
+ENTRYPOINT ["/application/vendor/bin/ecs"]
+
+CMD ["--help"]
