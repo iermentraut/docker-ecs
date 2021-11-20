@@ -1,0 +1,132 @@
+---
+name: ci
+
+on:
+    push:
+        paths:
+            - .github/**
+            - Dockerfile
+            - .dockerignore
+
+    pull_request:
+        paths:
+            - .github/**
+            - Dockerfile
+            - .dockerignore
+
+    release:
+        types:
+            - created
+
+jobs:
+    Build:
+        runs-on: ubuntu-20.04
+
+        strategy:
+            matrix:
+                composer_version: ["2.1.3"]
+                platform: [alpine]
+                php_version: ["8.0", "7.4", "7.3"]
+                ecs_version: ["9.4.70", "v9.3.26", "9.2.1"]
+
+        steps:
+            - name: Set up Docker Buildx
+              uses: docker/setup-buildx-action@v1
+
+            - name: Build images
+              id: docker_build
+              uses: docker/build-push-action@v2
+              with:
+                  push: false
+                  tags: |
+                      iermentraut/ecs:${{ matrix.ecs_version }}-php${{ matrix.php_version }}-${{ matrix.platform }}
+                  build-args: |
+                      COMPOSER_VERSION=${{ matrix.composer_version }}
+                      ECS_PACKAGE_VERSION=${{ matrix.ecs_version }}
+                      PHP_VERSION=${{ matrix.php_version }}
+                  outputs: type=docker,dest=${{ matrix.ecs_version }}-php${{ matrix.php_version }}-${{ matrix.platform }}.tar
+
+            - name: Upload images as artifacts
+              uses: actions/upload-artifact@v2
+              with:
+                  name: ${{ matrix.ecs_version }}-php${{ matrix.php_version }}-${{ matrix.platform }}
+                  path: ${{ matrix.ecs_version }}-php${{ matrix.php_version }}-${{ matrix.platform }}.tar
+                  if-no-files-found: error
+
+    Test:
+        runs-on: ubuntu-20.04
+        needs: [build]
+
+        strategy:
+            matrix:
+                composer_version: ["2.1.3"]
+                platform: [alpine]
+                php_version: ["8.0", "7.4", "7.3"]
+                ecs_version: ["9.4.70", "v9.3.26", "9.2.1"]
+
+        steps:
+            - name: Set up Docker Buildx
+              uses: docker/setup-buildx-action@v1
+
+            - name: Download artifact
+              uses: actions/download-artifact@v2
+              with:
+                  name: ${{ matrix.ecs_version }}-php${{ matrix.php_version }}-${{ matrix.platform }}
+
+            - name: Load Docker images from .tar
+              run: |
+                  docker load --input ${{ matrix.ecs_version }}-php${{ matrix.php_version }}-${{ matrix.platform }}.tar
+
+            - name: Basic functionality test
+              run: |
+                  docker run --rm iermentraut/ecs:${{ matrix.ecs_version }}-php${{ matrix.php_version }}-${{ matrix.platform }}
+                  docker run --rm -u $UID iermentraut/ecs:${{ matrix.ecs_version }}-php${{ matrix.php_version }}-${{ matrix.platform }}
+
+            - name: Install Grype
+              run: |
+                  curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+
+            - name: Install Trivy
+              run: |
+                  curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin v0.21.0
+
+            - name: Scan images for known vulnerabilities with Grype
+              run: |
+                  grype ${{ matrix.ecs_version }}-php${{ matrix.php_version }}-${{ matrix.platform }}.tar
+
+            - name: Scan images for known vulnerabilities with Trivy
+              run: |
+                  trivy image iermentraut/ecs:${{ matrix.ecs_version }}-php${{ matrix.php_version }}-${{ matrix.platform }}
+
+    Publish:
+        runs-on: ubuntu-20.04
+        needs: [test]
+        if: github.ref == 'refs/heads/master'
+        strategy:
+            matrix:
+                composer_version: ["2.1.3"]
+                platform: [alpine]
+                php_version: ["8.0", "7.4", "7.3"]
+                ecs_version: ["9.4.70", "v9.3.26", "9.2.1"]
+        steps:
+            - name: Download artifact
+              uses: actions/download-artifact@v2
+              with:
+                  name: ${{ matrix.ecs_version }}-php${{ matrix.php_version }}-${{ matrix.platform }}
+
+            - name: Load Docker image
+              run: docker load --input ${{ matrix.ecs_version }}-php${{ matrix.php_version }}-${{ matrix.platform }}.tar
+
+            - name: Login to DockerHub
+              uses: docker/login-action@v1
+              with:
+                  username: ${{ secrets.DOCKERHUB_USERNAME }}
+                  password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+            - name: Push images to DockerHub
+              id: docker_build
+              uses: docker/build-push-action@v2
+              with:
+                  push: true
+                  tags: |
+                      iermentraut/ecs:${{ matrix.ecs_version }}-php${{ matrix.php_version }}-${{ matrix.platform }}
